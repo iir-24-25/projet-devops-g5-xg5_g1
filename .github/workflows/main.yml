@@ -1,0 +1,27 @@
+name: CI - Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'  # Choisis la distribution Java (Temurin est une bonne option)
+        java-version: '17'       # Choisis la version de Java (ici, 17)
+
+    - name: Build with Maven
+      run: mvn clean install -DskipTests  # Compile le projet sans exécuter les tests
+
+    - name: Run Tests
+      run: mvn test  # Exécute les tests unitaires
