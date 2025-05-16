@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: ./BACKEND
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: frontend
+        working-directory: ./FRONDEND
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -61,10 +61,10 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Build backend Docker image
-        run: docker build -t myapp-backend:latest ./backend
+        run: docker build -t myapp-backend:latest ./BACKEND
 
       - name: Build frontend Docker image
-        run: docker build -t myapp-frontend:latest ./frontend
+        run: docker build -t myapp-frontend:latest ./FRONDEND
 
   deploy:
     name: Deploy to Production
