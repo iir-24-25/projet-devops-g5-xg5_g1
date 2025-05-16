@@ -16,6 +16,7 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: ""
+          MYSQL_ALLOW_EMPTY_PASSWORD: true
           MYSQL_DATABASE: Stock
           MYSQL_ROOT_HOST: '%'
         ports:
