@@ -1,16 +1,37 @@
 services:
   backend:
-    build: ./backend
+    build: ./BACKEND
     ports:
-      - "8080:8080"
-    networks:
-      - mynetwork
+      - "5050:5050"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://db:3306/Stock?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    depends_on:
+      db:
+        condition: service_healthy
 
   frontend:
-    build: ./frontend
+    build: ./FRONDEND
     ports:
-      - "3000:3000"
-    networks:
-      - mynetwork
-	networks:
-  mynetwork:
+      - "5174:5174"
+    environment:
+      - REACT_APP_API_BASE_URL=/api
+    depends_on:
+      - backend
+
+  db:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD:""
+      MYSQL_ALLOW_EMPTY_PASSWORD: true
+      MYSQL_DATABASE: Stock
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-u", "root", "-psystem"]
+      interval: 5s
+      timeout: 10s
+      retries: 15
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+volumes:
+  mysql_data:
