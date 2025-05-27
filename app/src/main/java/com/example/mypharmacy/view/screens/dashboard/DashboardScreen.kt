@@ -150,7 +150,7 @@ fun DashboardScreen(
             // Welcome message
             item {
                 WelcomeSection(
-                    username = authState.currentUser?.username ?: "Utilisateur"
+                    username = authState.currentUser?.username ?: "Pharmacist"
                 )
             }
 

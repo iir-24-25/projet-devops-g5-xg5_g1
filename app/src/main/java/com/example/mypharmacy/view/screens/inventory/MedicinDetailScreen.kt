@@ -70,16 +70,25 @@ fun MedicinDetailScreen(
     val context = LocalContext.current
     var showDeleteConfirmation by remember { mutableStateOf(false) }
 
-    // Load medicin by ID
+    // SECTION MODIFIÉE: Chargement du médicament
+    // Essayer de trouver le médicament dans la liste actuelle
     LaunchedEffect(medicinId) {
-        // Find the medicin in the existing list or reload if needed
         val foundMedicin = state.medicins.find { it.id.toLong() == medicinId }
         if (foundMedicin != null) {
             viewModel.selectMedicin(foundMedicin)
         } else {
-            // If not found, we might need to load medicins first
-            // This depends on your data loading strategy
-            // You could call viewModel.loadAllMedicins() here
+            // Si non trouvé, charger tous les médicaments
+            viewModel.loadAllMedicins()
+        }
+    }
+
+    // Ajouter un second effet pour vérifier à nouveau après le chargement
+    LaunchedEffect(state.medicins) {
+        if (state.selectedMedicin == null || state.selectedMedicin?.id?.toLong() != medicinId) {
+            val foundMedicin = state.medicins.find { it.id.toLong() == medicinId }
+            if (foundMedicin != null) {
+                viewModel.selectMedicin(foundMedicin)
+            }
         }
     }
 

@@ -255,19 +255,7 @@ fun RegisterScreen(
                         )
                     }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        RadioButton(
-                            selected = selectedRole == Role.ADMINISTRATEUR,
-                            onClick = { selectedRole = Role.ADMINISTRATEUR }
-                        )
-                        Text(
-                            text = "Administrateur",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                    }
+
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))

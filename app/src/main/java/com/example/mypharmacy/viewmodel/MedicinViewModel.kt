@@ -1,6 +1,6 @@
 package com.example.mypharmacy.viewmodel
 
-
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mypharmacy.model.domain.Medicin
@@ -91,23 +91,57 @@ class MedicinViewModel @Inject constructor(
 
     fun createMedicin(medicin: Medicin) {
         viewModelScope.launch {
+            Log.d("MedicinViewModel", "Création de médicament: ${medicin.name}")
             _state.update { it.copy(isLoading = true, error = null) }
-            try {
-                val id = medicinRepository.insertMedicin(medicin)
 
-                // Check if stock is low and create alert if needed
-                if (medicin.quantity != null && medicin.seuilAlerte != null &&
-                    medicin.quantity <= medicin.seuilAlerte) {
-                    alerteRepository.checkForLowStockAlerts(
-                        medicin = id.toInt().toLong(),
-                        quantity = medicin.quantity,
-                        seuilAlerte = medicin.seuilAlerte,
-                        lotId = 0 // Default value, should be updated with actual lot
+            try {
+                // 1. Ajouter d'abord à la base de données locale pour affichage immédiat
+                val localId = medicinRepository.insertMedicin(medicin)
+
+                // 2. Créer une copie avec l'ID local pour l'affichage
+                val localMedicin = medicin.copy(id = localId.toInt())
+
+                // 3. Mettre à jour l'UI immédiatement avec la version locale
+                _state.update { currentState ->
+                    val updatedMedicins = currentState.medicins.toMutableList()
+                    updatedMedicins.add(localMedicin)
+                    // Et aussi sélectionner le médicament pour l'écran de détail
+                    currentState.copy(
+                        medicins = updatedMedicins,
+                        selectedMedicin = localMedicin,
+                        isLoading = false
                     )
                 }
 
-                refreshMedicins()
+                Log.d("MedicinViewModel", "Médicament ajouté à l'UI, ID: ${localMedicin.id}")
+
+                // 4. Vérifier si le stock est bas et créer une alerte si nécessaire
+                if (medicin.quantity != null && medicin.seuilAlerte != null &&
+                    medicin.quantity <= medicin.seuilAlerte) {
+                    alerteRepository.checkForLowStockAlerts(
+                        medicin = localId.toInt().toLong(),
+                        quantity = medicin.quantity,
+                        seuilAlerte = medicin.seuilAlerte,
+                        lotId = 0 // Valeur par défaut
+                    )
+                }
+
+                // 5. Essayer d'envoyer au serveur en arrière-plan
+                viewModelScope.launch {
+                    try {
+                        Log.d("MedicinViewModel", "Envoi au serveur: ${medicin.name}")
+                        val remoteMedicin = medicinRepository.createMedicin(medicin)
+                        Log.d("MedicinViewModel", "Réponse du serveur, ID: ${remoteMedicin.id}")
+
+                        // Rafraîchir pour synchroniser la version distante
+                        refreshMedicins()
+                    } catch (e: Exception) {
+                        Log.e("MedicinViewModel", "Erreur serveur: ${e.message}", e)
+                        // Ne pas modifier l'UI ici - le médicament est déjà affiché localement
+                    }
+                }
             } catch (e: Exception) {
+                Log.e("MedicinViewModel", "Erreur locale: ${e.message}", e)
                 _state.update { it.copy(error = e.message, isLoading = false) }
             }
         }
@@ -117,20 +151,48 @@ class MedicinViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
+                // Mettre à jour localement pour affichage immédiat
                 medicinRepository.updateMedicin(medicin)
 
-                // Check if stock is low and create alert if needed
+                // Mettre à jour l'UI immédiatement
+                _state.update { currentState ->
+                    val updatedMedicins = currentState.medicins.map {
+                        if (it.id == medicin.id) medicin else it
+                    }
+                    // Mettre à jour également le médicament sélectionné si c'est celui qui est modifié
+                    val updatedSelectedMedicin = if (currentState.selectedMedicin?.id == medicin.id) {
+                        medicin
+                    } else {
+                        currentState.selectedMedicin
+                    }
+
+                    currentState.copy(
+                        medicins = updatedMedicins,
+                        selectedMedicin = updatedSelectedMedicin,
+                        isLoading = false
+                    )
+                }
+
+                // Vérifier le stock
                 if (medicin.quantity != null && medicin.seuilAlerte != null &&
                     medicin.quantity <= medicin.seuilAlerte) {
                     alerteRepository.checkForLowStockAlerts(
                         medicin = medicin.id.toLong(),
                         quantity = medicin.quantity,
                         seuilAlerte = medicin.seuilAlerte,
-                        lotId = 0 // Default value, should be updated with actual lot
+                        lotId = 0
                     )
                 }
 
-                refreshMedicins()
+                // Mettre à jour sur le serveur en arrière-plan
+                viewModelScope.launch {
+                    try {
+                        medicinRepository.updateMedicinRemote(medicin.id.toLong(), medicin)
+                        refreshMedicins()
+                    } catch (e: Exception) {
+                        Log.e("MedicinViewModel", "Erreur mise à jour serveur: ${e.message}", e)
+                    }
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message, isLoading = false) }
             }
@@ -141,8 +203,36 @@ class MedicinViewModel @Inject constructor(
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
             try {
+                // Supprimer localement
                 medicinRepository.deleteMedicin(medicin)
-                refreshMedicins()
+
+                // Mettre à jour l'UI immédiatement
+                _state.update { currentState ->
+                    val updatedMedicins = currentState.medicins.filter { it.id != medicin.id }
+
+                    // Si le médicament supprimé est celui sélectionné, désélectionner
+                    val updatedSelectedMedicin = if (currentState.selectedMedicin?.id == medicin.id) {
+                        null
+                    } else {
+                        currentState.selectedMedicin
+                    }
+
+                    currentState.copy(
+                        medicins = updatedMedicins,
+                        selectedMedicin = updatedSelectedMedicin,
+                        isLoading = false
+                    )
+                }
+
+                // Supprimer sur le serveur en arrière-plan
+                viewModelScope.launch {
+                    try {
+                        medicinRepository.deleteMedicinRemote(medicin.id.toLong())
+                        refreshMedicins()
+                    } catch (e: Exception) {
+                        Log.e("MedicinViewModel", "Erreur suppression serveur: ${e.message}", e)
+                    }
+                }
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message, isLoading = false) }
             }

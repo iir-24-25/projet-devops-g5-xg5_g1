@@ -33,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -46,13 +47,12 @@ import com.example.mypharmacy.model.domain.MouvementStock
 import com.example.mypharmacy.model.domain.TypeMouvement
 import com.example.mypharmacy.view.components.LoadingOverlay
 import com.example.mypharmacy.view.components.MyPharmacyTopAppBar
-import com.example.mypharmacy.viewmodel.AuthViewModel
 import com.example.mypharmacy.viewmodel.MedicinViewModel
 import com.example.mypharmacy.viewmodel.MouvementStockViewModel
 import java.time.LocalDateTime
 
 /**
- * Screen for adding a new stock movement
+ * Screen for adding a new stock movement (Simplified - No Authentication)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,19 +60,18 @@ fun AddMovementScreen(
     lotId: Long?,
     navigateUp: () -> Unit,
     viewModel: MouvementStockViewModel = hiltViewModel(),
-    medicinViewModel: MedicinViewModel = hiltViewModel(),
-    authViewModel: AuthViewModel = hiltViewModel()
+    medicinViewModel: MedicinViewModel = hiltViewModel()
 ) {
     val mouvementState by viewModel.state.collectAsState()
     val medicinState by medicinViewModel.state.collectAsState()
-    val authState by authViewModel.state.collectAsState()
     val context = LocalContext.current
 
     // Form state
     var type by remember { mutableStateOf(TypeMouvement.ENTREE) }
     var motif by remember { mutableStateOf("") }
     var quantite by remember { mutableStateOf("") }
-    var selectedMedicinId by remember { mutableStateOf<Int?>(null) }
+    var selectedMedicinId by remember { mutableIntStateOf(0) }
+    var hasNavigated by remember { mutableStateOf(false) }
 
     // Dropdown state
     var expanded by remember { mutableStateOf(false) }
@@ -80,6 +79,25 @@ fun AddMovementScreen(
     // Load medicins for selection
     LaunchedEffect(Unit) {
         medicinViewModel.loadAllMedicins()
+    }
+
+    // Handle success navigation
+    LaunchedEffect(mouvementState.isLoading, mouvementState.error) {
+        if (!mouvementState.isLoading && mouvementState.error == null && !hasNavigated) {
+            if (motif.isNotBlank() && quantite.isNotBlank() && selectedMedicinId > 0) {
+                hasNavigated = true
+                Toast.makeText(context, "Mouvement enregistré avec succès", Toast.LENGTH_SHORT).show()
+                navigateUp()
+            }
+        }
+    }
+
+    // Handle error messages
+    LaunchedEffect(mouvementState.error) {
+        mouvementState.error?.let { error ->
+            Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+            viewModel.clearError()
+        }
     }
 
     Scaffold(
@@ -94,31 +112,40 @@ fun AddMovementScreen(
             FloatingActionButton(
                 onClick = {
                     // Validate required fields
-                    if (motif.isBlank() || quantite.isBlank() || selectedMedicinId == null) {
-                        Toast.makeText(context, "Veuillez remplir tous les champs requis", Toast.LENGTH_SHORT).show()
+                    if (motif.isBlank()) {
+                        Toast.makeText(context, "Veuillez saisir un motif", Toast.LENGTH_SHORT).show()
+                        return@FloatingActionButton
+                    }
+
+                    if (quantite.isBlank()) {
+                        Toast.makeText(context, "Veuillez saisir une quantité", Toast.LENGTH_SHORT).show()
+                        return@FloatingActionButton
+                    }
+
+                    if (selectedMedicinId <= 0) {
+                        Toast.makeText(context, "Veuillez sélectionner un médicament", Toast.LENGTH_SHORT).show()
                         return@FloatingActionButton
                     }
 
                     // Validate quantity
                     val qte = quantite.toIntOrNull()
                     if (qte == null || qte <= 0) {
-                        Toast.makeText(context, "Quantité invalide", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Quantité invalide (doit être un nombre positif)", Toast.LENGTH_SHORT).show()
                         return@FloatingActionButton
                     }
 
-                    // Create movement
+                    // Create movement with default user ID (1L)
                     val mouvement = MouvementStock(
-                        motif = motif,
+                        motif = motif.trim(),
                         type = type,
                         dateMouvement = LocalDateTime.now(),
-                        lotId = lotId ?: 0, // In a real app, you'd have a proper lot selection
-                        utilisateurId = authState.currentUser?.id ?: 0,
+                        lotId = selectedMedicinId.toLong(), // Convert Int to Long
+                        utilisateurId = 1L, // Default user ID - no authentication needed
                         quantite = qte
                     )
 
+                    hasNavigated = false
                     viewModel.createMouvement(mouvement)
-                    Toast.makeText(context, "Mouvement enregistré", Toast.LENGTH_SHORT).show()
-                    navigateUp()
                 },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = MaterialTheme.colorScheme.onPrimary
@@ -190,8 +217,10 @@ fun AddMovementScreen(
                     onExpandedChange = { expanded = it },
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    val selectedMedicin = medicinState.medicins.find { it.id == selectedMedicinId }
+
                     OutlinedTextField(
-                        value = medicinState.medicins.find { it.id == selectedMedicinId }?.name ?: "",
+                        value = selectedMedicin?.name ?: "",
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Médicament*") },
@@ -200,7 +229,8 @@ fun AddMovementScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .menuAnchor(),
-                        singleLine = true
+                        singleLine = true,
+                        isError = selectedMedicinId <= 0
                     )
 
                     ExposedDropdownMenu(
@@ -208,29 +238,73 @@ fun AddMovementScreen(
                         onDismissRequest = { expanded = false },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        medicinState.medicins.forEach { medicin ->
+                        if (medicinState.medicins.isEmpty()) {
                             DropdownMenuItem(
                                 text = {
-                                    Text(text = "${medicin.name} (${medicin.quantity ?: 0} en stock)")
+                                    Text(
+                                        text = "Aucun médicament disponible",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 },
-                                onClick = {
-                                    selectedMedicinId = medicin.id
-                                    expanded = false
-                                }
+                                onClick = { }
                             )
+                        } else {
+                            medicinState.medicins.forEach { medicin ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(
+                                                text = medicin.name,
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            Text(
+                                                text = "Stock: ${medicin.quantity ?: 0} unités",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedMedicinId = medicin.id
+                                        expanded = false
+                                    }
+                                )
+                            }
                         }
+                    }
+                }
+
+                // Show current stock for selected medicin
+                if (selectedMedicinId > 0) {
+                    val selectedMedicin = medicinState.medicins.find { it.id == selectedMedicinId }
+                    selectedMedicin?.let { medicin ->
+                        Text(
+                            text = "Stock actuel: ${medicin.quantity ?: 0} unités",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = when {
+                                (medicin.quantity ?: 0) <= 0 -> MaterialTheme.colorScheme.error
+                                (medicin.quantity ?: 0) <= 10 -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.primary
+                            }
+                        )
                     }
                 }
 
                 // Quantity
                 OutlinedTextField(
                     value = quantite,
-                    onValueChange = { quantite = it },
+                    onValueChange = { newValue ->
+                        // Only allow numbers
+                        if (newValue.isEmpty() || newValue.all { char -> char.isDigit() }) {
+                            quantite = newValue
+                        }
+                    },
                     label = { Text("Quantité*") },
                     placeholder = { Text("Nombre d'unités") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    isError = quantite.isBlank() || quantite.toIntOrNull() == null || (quantite.toIntOrNull() ?: 0) <= 0
                 )
 
                 // Motif
@@ -238,19 +312,32 @@ fun AddMovementScreen(
                     value = motif,
                     onValueChange = { motif = it },
                     label = { Text("Motif*") },
-                    placeholder = { Text("Raison du mouvement") },
+                    placeholder = { Text("Raison du mouvement (ex: Livraison, Vente, Péremption...)") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(120.dp),
-                    maxLines = 5
+                    maxLines = 5,
+                    isError = motif.isBlank()
                 )
 
-                // Required fields note
-                Text(
-                    text = "* Champs obligatoires",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                // Info section
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp)
+                ) {
+                    Text(
+                        text = "* Champs obligatoires",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Text(
+                        text = "ℹ️ Le stock sera automatiquement mis à jour après l'enregistrement",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(80.dp)) // Space for FAB
             }
